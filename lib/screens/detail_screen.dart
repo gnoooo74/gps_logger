@@ -212,6 +212,11 @@ class _DetailScreenState extends State<DetailScreen> {
       font-size: 12px;
       border-radius: 15px;
     }
+    /* GPS 스파이크로 의심되는 지점: 반투명 회색으로 흐리게 표시 */
+    .pin.spike {
+      background: rgba(120, 120, 120, 0.45);
+      color: rgba(255, 255, 255, 0.85);
+    }
   </style>
 </head>
 <body>
@@ -220,20 +225,63 @@ class _DetailScreenState extends State<DetailScreen> {
   <script>
     var points = [$pointsJs];
 
+    function toRad(v) { return v * Math.PI / 180; }
+
+    // 두 좌표 사이의 실제 거리(미터)
+    function distanceMeters(a, b) {
+      var R = 6371000;
+      var dLat = toRad(b.lat - a.lat);
+      var dLng = toRad(b.lng - a.lng);
+      var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) *
+              Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1 - s));
+    }
+
+    // points는 이미 시간순(이전 -> 선택 -> 다음)으로 정렬되어 있음.
+    // 앞뒤로는 멀리 떨어졌는데(각각 300m 이상), 그 앞/뒤 지점끼리는 훨씬 가깝다면
+    // ("갔다가 되돌아온" 모양) 이 지점은 GPS 스파이크일 가능성이 큼.
+    for (var i = 1; i < points.length - 1; i++) {
+      var prev = points[i - 1];
+      var cur = points[i];
+      var next = points[i + 1];
+
+      var dPrevCur = distanceMeters(prev, cur);
+      var dCurNext = distanceMeters(cur, next);
+      var dPrevNext = distanceMeters(prev, next);
+
+      if (dPrevCur > 300 && dCurNext > 300 &&
+          dPrevNext < Math.min(dPrevCur, dCurNext) * 0.4) {
+        cur.isSpike = true;
+      }
+    }
+
     var container = document.getElementById('map');
     var map = new kakao.maps.Map(container, {
       center: new kakao.maps.LatLng(${center.lat}, ${center.lng}),
       level: 6
     });
 
+    // 핀치줌/휠줌은 기본으로 되지만, 손가락 제스처 없이도 눌러서
+    // 확대/축소할 수 있게 +/- 버튼을 지도 오른쪽에 띄운다.
+    map.setZoomable(true);
+    var zoomControl = new kakao.maps.ZoomControl();
+    map.addControl(zoomControl, kakao.maps.ControlPosition.RIGHT);
+
     var bounds = new kakao.maps.LatLngBounds();
 
     points.forEach(function (p) {
       var pos = new kakao.maps.LatLng(p.lat, p.lng);
-      bounds.extend(pos);
+
+      // 스파이크로 의심되는 지점(선택 지점 제외)은 화면 범위 계산에서 빼서,
+      // 그 지점 하나 때문에 지도가 과도하게 줌아웃되지 않게 한다.
+      if (p.selected || !p.isSpike) {
+        bounds.extend(pos);
+      }
 
       var el = document.createElement('div');
-      el.className = 'pin ' + (p.selected ? 'selected' : 'normal');
+      var cls = p.selected ? 'selected' : (p.isSpike ? 'spike' : 'normal');
+      el.className = 'pin ' + cls;
       el.innerText = p.label;
 
       var overlay = new kakao.maps.CustomOverlay({
@@ -241,13 +289,20 @@ class _DetailScreenState extends State<DetailScreen> {
         content: el,
         yAnchor: 0.5,
         xAnchor: 0.5,
-        zIndex: p.selected ? 10 : 1
+        zIndex: p.selected ? 10 : (p.isSpike ? 0 : 1)
       });
       overlay.setMap(map);
     });
 
     if (points.length > 1) {
       map.setBounds(bounds);
+
+      // 그래도 남은 지점들 범위가 너무 넓어서 과도하게 줌아웃되는 경우를 대비한
+      // 마지막 안전장치: 선택 지점 기준 적당한 확대 수준으로 되돌린다.
+      if (map.getLevel() > 7) {
+        map.setLevel(6);
+        map.setCenter(new kakao.maps.LatLng(${center.lat}, ${center.lng}));
+      }
     }
   </script>
 </body>
