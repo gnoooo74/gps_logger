@@ -18,6 +18,9 @@ PERMISSIONS = """
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <!-- 다운로드/gps_logs 폴더에 파일 로그를 쓰기 위한 권한.
+         선언 안 하면 GpsLogFileService의 권한 요청이 계속 조용히 실패함. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage"/>
 """
 
 # Android 14(API 34)부터는 포그라운드 서비스 시작 시 타입을 선언하지 않으면
