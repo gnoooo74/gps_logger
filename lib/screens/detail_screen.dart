@@ -62,8 +62,11 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   /// 선택 지점을 기준으로 시간순으로 이전 최대 4개, 다음 최대 4개를 뽑아
-  /// 지도에 찍을 점 목록을 만든다. 라벨은 1,2,3,4(이전) - 선택 - 5,6,7,8(다음)
-  /// 순으로 끊김 없이 이어지도록 매긴다 (앞/뒤가 4개보다 적으면 있는 만큼만).
+  /// 지도에 찍을 점 목록을 만든다. 라벨은 이전 -> 선택 -> 다음 순으로
+  /// 1번부터 끊김 없이 매기며, 선택 지점도 번호를 가진다.
+  /// 예) 이전 4 + 선택 + 다음 4 -> 1,2,3,4,5(선택),6,7,8,9
+  ///     이전 1 + 선택 + 다음 3 -> 1,2(선택),3,4,5
+  /// (앞/뒤가 4개보다 적으면 있는 만큼만 채운다.)
   List<_MapPoint> _buildMapPoints() {
     final all = widget.allRecords;
     final selected = widget.record;
@@ -73,7 +76,7 @@ class _DetailScreenState extends State<DetailScreen> {
         _MapPoint(
           lat: selected.latitude,
           lng: selected.longitude,
-          label: '',
+          label: '1',
           isSelected: true,
           timestamp: selected.timestamp,
         ),
@@ -87,7 +90,7 @@ class _DetailScreenState extends State<DetailScreen> {
         _MapPoint(
           lat: selected.latitude,
           lng: selected.longitude,
-          label: '',
+          label: '1',
           isSelected: true,
           timestamp: selected.timestamp,
         ),
@@ -112,10 +115,11 @@ class _DetailScreenState extends State<DetailScreen> {
       ));
     }
 
+    // 선택 지점도 이전 것들 뒤를 이어받는 번호를 가짐 (예: 이전이 4개면 선택은 5번)
     points.add(_MapPoint(
       lat: selected.latitude,
       lng: selected.longitude,
-      label: '',
+      label: '${previous.length + 1}',
       isSelected: true,
       timestamp: selected.timestamp,
     ));
@@ -124,7 +128,7 @@ class _DetailScreenState extends State<DetailScreen> {
       points.add(_MapPoint(
         lat: next[i].latitude,
         lng: next[i].longitude,
-        label: '${previous.length + 1 + i}',
+        label: '${previous.length + 2 + i}',
         isSelected: false,
         timestamp: next[i].timestamp,
       ));
@@ -151,7 +155,7 @@ class _DetailScreenState extends State<DetailScreen> {
     );
 
     final pointsJs = points.map((p) {
-      final labelText = p.isSelected ? '선택' : p.label;
+      final labelText = p.isSelected ? '${p.label}(선택)' : p.label;
       return "{lat: ${p.lat}, lng: ${p.lng}, label: '$labelText', selected: ${p.isSelected}}";
     }).join(',');
 
@@ -296,7 +300,7 @@ class _MapLegend extends StatelessWidget {
         spacing: 10,
         runSpacing: 4,
         children: points.map((p) {
-          final label = p.isSelected ? '선택' : p.label;
+          final label = p.isSelected ? '${p.label}(선택)' : p.label;
           return Text(
             '$label · ${timeFormat.format(p.timestamp)}',
             style: TextStyle(
