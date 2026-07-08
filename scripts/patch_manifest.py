@@ -23,11 +23,15 @@ PERMISSIONS = """
 # Android 14(API 34)부터는 포그라운드 서비스 시작 시 타입을 선언하지 않으면
 # MissingForegroundServiceTypeException으로 즉시 크래시함.
 # flutter_background_service가 만드는 서비스에 위치 타입을 명시해줘야 함.
+# tools:replace="android:exported" 가 필요한 이유: flutter_background_service_android
+# 플러그인 자체 매니페스트가 이 서비스를 exported=true로 선언하고 있어서,
+# 여기서 값을 지정하면 매니페스트 병합 충돌(Manifest merger failed)이 남.
 SERVICE_DECLARATION = """
     <service
         android:name="id.flutter.flutter_background_service.BackgroundService"
         android:foregroundServiceType="location"
-        android:exported="false" />
+        android:exported="false"
+        tools:replace="android:exported" />
 """
 
 def main():
@@ -35,6 +39,17 @@ def main():
         content = f.read()
 
     changed = False
+
+    # tools:replace 속성을 쓰려면 루트 <manifest> 태그에 xmlns:tools 선언이 있어야 함.
+    # `flutter create`가 만드는 기본 매니페스트에는 xmlns:android만 있고 없음.
+    if "xmlns:tools" not in content:
+        content = re.sub(
+            r'(<manifest\s+xmlns:android="[^"]*")',
+            r'\1 xmlns:tools="http://schemas.android.com/tools"',
+            content,
+            count=1,
+        )
+        changed = True
 
     if "ACCESS_BACKGROUND_LOCATION" not in content:
         content = re.sub(
