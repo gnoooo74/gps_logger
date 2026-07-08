@@ -10,16 +10,27 @@ import '../models/location_record.dart';
 import 'kakao_api.dart';
 
 /// 평소 로그 간격(초). 값이 바뀌든 안 바뀌든 이 주기로 무조건 기록합니다.
-const int baseIntervalSeconds = 60;
+const int baseIntervalSeconds = 30;
 
-/// "급격한 이동"이 감지됐을 때 로그 간격(초).
+/// "급격한 이동"이 확정됐을 때 로그 간격(초).
 const int fastIntervalSeconds = 10;
 
-/// "급격한 이동"으로 판단하는 속도 임계값 (km/h).
+/// "급격한 이동"으로 판단하는 속도 임계값 (km/h) → m/s로 환산해서 사용
 const double rapidSpeedThresholdKmh = 15;
-
-/// 위 값을 m/s로 환산 (Geolocator의 Position.speed 단위가 m/s이기 때문)
 const double rapidSpeedThresholdMps = rapidSpeedThresholdKmh * 1000 / 3600;
+
+/// [GPS 스파이크 필터 1] 위치 정확도(오차 반경, m)가 이보다 나쁘면
+/// 그 순간의 speed 값은 신뢰하지 않습니다. (신호 불량 구간에서 튀는 값 배제)
+const double maxAcceptableAccuracyMeters = 30;
+
+/// [GPS 스파이크 필터 2] 속도 추정치 자체의 오차(m/s)가 이보다 크면 신뢰하지 않습니다.
+/// 일부 기기/OS는 이 값을 0으로 주기도 하는데("값 없음"의 의미), 그 경우는 건너뜁니다.
+const double maxAcceptableSpeedAccuracyMps = 2.5;
+
+/// [GPS 스파이크 필터 3] 급격 모드로 "진입"하려면 신뢰 가능한 고속 판정이
+/// 이 횟수만큼 연속으로 나와야 합니다. 단발성 스파이크는 진입을 못 시킵니다.
+/// (급격 모드에서 "이탈"은 즉시 이뤄집니다 — 정책상 그렇게 정했습니다)
+const int requiredConsecutiveFastReadings = 2;
 
 Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
@@ -43,12 +54,11 @@ Future<void> initializeBackgroundService() async {
 /// 백그라운드 isolate 진입점
 ///
 /// 정책:
-/// - 평소에는 baseIntervalSeconds(1분)마다 무조건 기록
-/// - 직전 수집에서 속도가 rapidSpeedThresholdMps(15km/h) 이상이었다면
-///   fastIntervalSeconds(10초) 뒤에 바로 다음 수집을 진행 (급격 모드)
-/// - 급격 모드 중 속도가 임계값 아래로 내려가면 다음 턴부터 즉시 1분 간격으로 복귀
-///   (임계값 근처에서 속도가 왔다갔다 하면 간격도 같이 왔다갔다 할 수 있음 —
-///    필요하면 나중에 "N분 연속 임계값 아래일 때만 복귀" 같은 유지시간을 추가할 수 있습니다)
+/// - 평소에는 baseIntervalSeconds(30초)마다 무조건 기록
+/// - 신뢰 가능한 고속 판정(정확도+속도오차 필터 통과 && 15km/h 이상)이
+///   requiredConsecutiveFastReadings(2)번 연속 나오면 급격 모드로 진입,
+///   이후 fastIntervalSeconds(10초) 간격으로 기록
+/// - 급격 모드 중 신뢰 가능한 고속 판정이 한 번이라도 끊기면 즉시 평소 간격으로 복귀
 @pragma('vm:entry-point')
 void onServiceStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
@@ -63,15 +73,32 @@ void onServiceStart(ServiceInstance service) async {
     service.stopSelf();
   });
 
+  int consecutiveFastReadings = 0;
+
   while (!stopped) {
     final position = await _collectAndSaveLocation();
 
-    final speedMps = position?.speed ?? 0;
-    final isRapidMove = speedMps >= rapidSpeedThresholdMps;
+    final reliableFast = position != null && _isReliableFastReading(position);
+    consecutiveFastReadings = reliableFast ? consecutiveFastReadings + 1 : 0;
+
+    final isRapidMove = consecutiveFastReadings >= requiredConsecutiveFastReadings;
 
     final waitSeconds = isRapidMove ? fastIntervalSeconds : baseIntervalSeconds;
     await Future.delayed(Duration(seconds: waitSeconds));
   }
+}
+
+/// 이 위치 판독을 "신뢰 가능한 고속 판정"으로 볼 수 있는지 검사합니다.
+/// - 속도가 임계값 이상이어야 하고
+/// - 위치 정확도가 충분히 좋아야 하고 (GPS 오차로 인한 스파이크 배제)
+/// - 속도 추정치 자체의 오차도 충분히 작아야 함 (0이면 "값 없음"으로 보고 건너뜀)
+bool _isReliableFastReading(Position position) {
+  final isFastEnough = position.speed >= rapidSpeedThresholdMps;
+  final hasGoodAccuracy = position.accuracy <= maxAcceptableAccuracyMeters;
+  final speedAccuracyOk = position.speedAccuracy <= 0 ||
+      position.speedAccuracy <= maxAcceptableSpeedAccuracyMps;
+
+  return isFastEnough && hasGoodAccuracy && speedAccuracyOk;
 }
 
 /// 위치를 한 번 수집해서 DB에 저장하고, 다음 간격 판단에 쓸 Position을 반환합니다.
