@@ -7,6 +7,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../db/database_helper.dart';
 import '../models/location_record.dart';
+import 'gps_log_file_service.dart';
 import 'kakao_api.dart';
 
 /// 평소 로그 간격(초). 값이 바뀌든 안 바뀌든 이 주기로 무조건 기록합니다.
@@ -127,6 +128,15 @@ Future<Position?> _collectAndSaveLocation() async {
     );
 
     await DatabaseHelper.instance.insertRecord(record);
+
+    // 다운로드/gps_logs/날짜.csv 파일에도 같은 기록을 남김 (구/동 주소 포함)
+    await GpsLogFileService.appendLog(
+      timestamp: record.timestamp,
+      latitude: record.latitude,
+      longitude: record.longitude,
+      region2: record.region2,
+      region3: record.region3,
+    );
 
     return position;
   } catch (e) {
