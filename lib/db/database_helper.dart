@@ -14,24 +14,43 @@ class DatabaseHelper {
     return _db!;
   }
 
+  static const String _createTableSql = '''
+    CREATE TABLE location_records (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      latitude REAL,
+      longitude REAL,
+      timestamp TEXT NOT NULL,
+      region2 TEXT,
+      region3 TEXT,
+      status TEXT NOT NULL DEFAULT 'ok'
+    )
+  ''';
+
   Future<Database> _initDb() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'location_tracker.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE location_records (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            latitude REAL NOT NULL,
-            longitude REAL NOT NULL,
-            timestamp TEXT NOT NULL,
-            region2 TEXT,
-            region3 TEXT
-          )
-        ''');
+        await db.execute(_createTableSql);
         await db.execute('CREATE INDEX idx_timestamp ON location_records(timestamp)');
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // v1: latitude/longitude NOT NULL, status 컬럼 없음
+          // v2: 위치/주소 획득 실패도 기록할 수 있도록 latitude/longitude를 nullable로,
+          //     status 컬럼을 추가 (SQLite는 컬럼 제약을 직접 못 바꿔서 테이블을 새로 만듦)
+          await db.execute('ALTER TABLE location_records RENAME TO location_records_old');
+          await db.execute(_createTableSql);
+          await db.execute('''
+            INSERT INTO location_records (id, latitude, longitude, timestamp, region2, region3, status)
+            SELECT id, latitude, longitude, timestamp, region2, region3, 'ok'
+            FROM location_records_old
+          ''');
+          await db.execute('DROP TABLE location_records_old');
+          await db.execute('CREATE INDEX idx_timestamp ON location_records(timestamp)');
+        }
       },
     );
   }
