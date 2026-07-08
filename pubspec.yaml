@@ -17,6 +17,10 @@ dependencies:
   flutter_background_service_android: ^6.2.2
   permission_handler: ^11.3.0
 
+  # 포그라운드 서비스 알림 채널을 미리 명시적으로 만들기 위함
+  # (채널이 준비되기 전에 startForeground가 호출되면 "Bad notification" 크래시가 남)
+  flutter_local_notifications: ^17.2.2
+
   # 로컬 저장
   sqflite: ^2.3.2
   path_provider: ^2.1.2
