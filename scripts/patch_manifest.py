@@ -20,24 +20,46 @@ PERMISSIONS = """
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
 """
 
+# Android 14(API 34)부터는 포그라운드 서비스 시작 시 타입을 선언하지 않으면
+# MissingForegroundServiceTypeException으로 즉시 크래시함.
+# flutter_background_service가 만드는 서비스에 위치 타입을 명시해줘야 함.
+SERVICE_DECLARATION = """
+    <service
+        android:name="id.flutter.flutter_background_service.BackgroundService"
+        android:foregroundServiceType="location"
+        android:exported="false" />
+"""
+
 def main():
     with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
         content = f.read()
 
-    if "ACCESS_BACKGROUND_LOCATION" in content:
+    changed = False
+
+    if "ACCESS_BACKGROUND_LOCATION" not in content:
+        content = re.sub(
+            r"(\s*)(<application)",
+            PERMISSIONS + r"\1\2",
+            content,
+            count=1,
+        )
+        changed = True
+
+    if "flutter_background_service.BackgroundService" not in content:
+        content = re.sub(
+            r"(\s*)(</application>)",
+            SERVICE_DECLARATION + r"\1\2",
+            content,
+            count=1,
+        )
+        changed = True
+
+    if not changed:
         print("이미 패치되어 있음, 건너뜀")
         return
 
-    # <application ...> 태그 바로 앞에 permission 블록 삽입
-    new_content = re.sub(
-        r"(\s*)(<application)",
-        PERMISSIONS + r"\1\2",
-        content,
-        count=1,
-    )
-
     with open(MANIFEST_PATH, "w", encoding="utf-8") as f:
-        f.write(new_content)
+        f.write(content)
 
     print("AndroidManifest.xml 패치 완료")
 
