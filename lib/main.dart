@@ -4,6 +4,7 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'screens/home_screen.dart';
+import 'services/gps_log_file_service.dart';
 import 'services/location_service.dart';
 
 Future<void> main() async {
@@ -18,6 +19,11 @@ Future<void> main() async {
   await Permission.notification.request();
   // 백그라운드에서도 계속 수집하려면 '항상 허용'이 필요합니다.
   await Permission.locationAlways.request();
+
+  // 다운로드/gps_logs 파일 로그를 쓰려면 "모든 파일 관리" 권한이 필요합니다.
+  // 이 권한은 설정 앱의 별도 화면으로 넘어가야 해서, 화면이 있는 지금(UI)
+  // 시점에 요청해야 합니다. 백그라운드 서비스 안에서는 상태만 확인합니다.
+  await GpsLogFileService.requestPermissionFromUi();
 
   await initializeBackgroundService();
 
