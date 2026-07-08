@@ -45,6 +45,10 @@ Future<void> initializeBackgroundService() async {
       initialNotificationTitle: '위치 수집 중',
       initialNotificationContent: '앱이 백그라운드에서 위치를 기록하고 있습니다',
       foregroundServiceNotificationId: 888,
+      // Android 14(API 34)+ 에서는 이 타입 선언이 없으면
+      // MissingForegroundServiceTypeException으로 서비스 시작 자체가 크래시함.
+      // AndroidManifest.xml의 <service> 태그에 선언한 foregroundServiceType="location"과 짝을 맞춰야 함.
+      foregroundServiceTypes: [AndroidForegroundType.location],
     ),
     iosConfiguration: IosConfiguration(),
   );
