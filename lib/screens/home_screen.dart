@@ -13,34 +13,27 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  Map<String, List<LocationRecord>> _grouped = {};
-
-  // 시간 오름차순(과거 -> 현재)으로 정렬된 전체 기록.
-  // 상세화면에서 "선택 지점 기준 이전 4개 / 다음 4개"를 계산할 때 씀.
-  List<LocationRecord> _allRecordsAscending = [];
-
+  late String _selectedDateKey; // yyyy-MM-dd
+  List<LocationRecord> _records = [];
   bool _loading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadRecords();
+    _selectedDateKey = _dateKeyOf(DateTime.now()); // 항상 오늘 날짜로 시작
+    _loadRecordsForSelectedDate();
   }
 
-  Future<void> _loadRecords() async {
-    // timestamp DESC(최신순)로 옴
-    final records = await DatabaseHelper.instance.getAllRecords();
+  String _dateKeyOf(DateTime dt) {
+    return '${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+  }
 
-    final grouped = <String, List<LocationRecord>>{};
-    for (final r in records) {
-      final dateKey =
-          '${r.timestamp.year.toString().padLeft(4, '0')}-${r.timestamp.month.toString().padLeft(2, '0')}-${r.timestamp.day.toString().padLeft(2, '0')}';
-      grouped.putIfAbsent(dateKey, () => []).add(r);
-    }
-
+  Future<void> _loadRecordsForSelectedDate() async {
+    setState(() => _loading = true);
+    final records =
+        await DatabaseHelper.instance.getRecordsForDate(_selectedDateKey);
     setState(() {
-      _grouped = grouped;
-      _allRecordsAscending = records.reversed.toList(); // 과거 -> 현재 순으로 뒤집음
+      _records = records;
       _loading = false;
     });
   }
@@ -50,18 +43,85 @@ class _HomeScreenState extends State<HomeScreen> {
     return DateFormat('yyyy년 M월 d일 (E)', 'ko_KR').format(date);
   }
 
-  // 날짜는 섹션 헤더에서 이미 보여주므로 항목에는 시:분:초만 표시
+  // 날짜는 상단에서 이미 보여주므로 항목에는 시:분:초만 표시
   String _formatTime(DateTime dt) {
     return DateFormat('HH:mm:ss').format(dt);
   }
 
-  void _openDetail(LocationRecord record) {
+  Future<void> _openDatePicker() async {
+    final dates = await DatabaseHelper.instance.getAvailableDates();
+    if (!mounted) return;
+
+    final picked = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: Text(
+                  '날짜 선택',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.deepPurple[700],
+                  ),
+                ),
+              ),
+              if (dates.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Text('기록이 있는 날짜가 없어요'),
+                )
+              else
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: dates.length,
+                    itemBuilder: (context, index) {
+                      final dateKey = dates[index];
+                      final isSelected = dateKey == _selectedDateKey;
+                      return ListTile(
+                        title: Text(_formatDateHeader(dateKey)),
+                        trailing: isSelected
+                            ? const Icon(Icons.check, color: Colors.deepPurple)
+                            : null,
+                        selected: isSelected,
+                        onTap: () => Navigator.pop(context, dateKey),
+                      );
+                    },
+                  ),
+                ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (picked != null && picked != _selectedDateKey) {
+      setState(() => _selectedDateKey = picked);
+      await _loadRecordsForSelectedDate();
+    }
+  }
+
+  Future<void> _openDetail(LocationRecord record) async {
+    final neighborWindow =
+        await DatabaseHelper.instance.getNeighborWindow(record);
+    if (!mounted) return;
+
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => DetailScreen(
           record: record,
-          allRecords: _allRecordsAscending,
+          allRecords: neighborWindow,
         ),
       ),
     );
@@ -69,52 +129,51 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 날짜 최신순 정렬
-    final sortedKeys = _grouped.keys.toList()..sort((a, b) => b.compareTo(a));
-
     return Scaffold(
       appBar: AppBar(
-        title: const Text('위치 수집 내역'),
+        title: InkWell(
+          onTap: _openDatePicker,
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Flexible(
+                child: Text(
+                  _formatDateHeader(_selectedDateKey),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.arrow_drop_down),
+            ],
+          ),
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            onPressed: _loadRecords,
+            onPressed: _loadRecordsForSelectedDate,
           ),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : sortedKeys.isEmpty
-              ? const Center(child: Text('아직 수집된 위치 기록이 없어요'))
+          : _records.isEmpty
+              ? Center(
+                  child: Text(
+                    _selectedDateKey == _dateKeyOf(DateTime.now())
+                        ? '아직 오늘 기록이 없어요'
+                        : '이 날짜에는 기록이 없어요',
+                  ),
+                )
               : RefreshIndicator(
-                  onRefresh: _loadRecords,
+                  onRefresh: _loadRecordsForSelectedDate,
                   child: ListView.builder(
-                    itemCount: sortedKeys.length,
+                    itemCount: _records.length,
                     itemBuilder: (context, index) {
-                      final dateKey = sortedKeys[index];
-                      final records = _grouped[dateKey]!;
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
-                            child: Text(
-                              _formatDateHeader(dateKey),
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.deepPurple,
-                              ),
-                            ),
-                          ),
-                          ...records.map(
-                            (record) => _LocationCard(
-                              record: record,
-                              timeLabel: _formatTime(record.timestamp),
-                              onMapTap: () => _openDetail(record),
-                            ),
-                          ),
-                        ],
+                      final record = _records[index];
+                      return _LocationCard(
+                        record: record,
+                        timeLabel: _formatTime(record.timestamp),
+                        onMapTap: () => _openDetail(record),
                       );
                     },
                   ),
@@ -188,7 +247,6 @@ class _LocationCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                // 좌표가 없으면 지도에 찍을 게 없으니 버튼을 비활성화
                 onPressed: record.hasCoordinates ? onMapTap : null,
                 icon: const Icon(Icons.map_outlined, size: 16),
                 label: const Text('맵보기'),
