@@ -11,3 +11,4 @@ android/local.properties
 *.ipr
 *.iws
 .idea/
+.DS_Store
