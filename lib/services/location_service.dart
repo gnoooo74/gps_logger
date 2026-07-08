@@ -3,6 +3,7 @@ import 'dart:ui';
 
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_background_service_android/flutter_background_service_android.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart';
 
 import '../db/database_helper.dart';
@@ -37,6 +38,8 @@ const int requiredConsecutiveFastReadings = 2;
 /// 하는 제한 시간. 이 시간을 넘기면 "위치 획득 실패"로 기록하고 다음 주기로 넘어감.
 const Duration gpsTimeout = Duration(seconds: 20);
 
+const String _notificationChannelId = 'location_tracker_channel';
+
 Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
 
@@ -50,12 +53,29 @@ Future<void> initializeBackgroundService() async {
     return;
   }
 
+  // service.configure()가 내부적으로 채널을 대신 만들어주긴 하지만,
+  // 그 타이밍에 따라 채널이 준비되기 전에 startForeground가 먼저 불려서
+  // "Bad notification for startForeground"로 크래시하는 사례가 보고되어 있음.
+  // 그래서 여기서 채널을 미리, 명시적으로 만들어둔다.
+  const channel = AndroidNotificationChannel(
+    _notificationChannelId,
+    '위치 수집 서비스',
+    description: '위치를 백그라운드에서 수집 중임을 알리는 상시 알림',
+    importance: Importance.low,
+  );
+
+  final notificationsPlugin = FlutterLocalNotificationsPlugin();
+  await notificationsPlugin
+      .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
   await service.configure(
     androidConfiguration: AndroidConfiguration(
       onStart: onServiceStart,
       autoStart: true,
       isForegroundMode: true,
-      notificationChannelId: 'location_tracker_channel',
+      notificationChannelId: _notificationChannelId,
       initialNotificationTitle: '위치 수집 중',
       initialNotificationContent: '앱이 백그라운드에서 위치를 기록하고 있습니다',
       foregroundServiceNotificationId: 888,
