@@ -33,6 +33,10 @@ const double maxAcceptableSpeedAccuracyMps = 2.5;
 /// (급격 모드에서 "이탈"은 즉시 이뤄집니다 — 정책상 그렇게 정했습니다)
 const int requiredConsecutiveFastReadings = 2;
 
+/// GPS 위치 요청 자체가 오래 걸릴 때(신호 불량, 실내 등) 무한정 기다리지 않도록
+/// 하는 제한 시간. 이 시간을 넘기면 "위치 획득 실패"로 기록하고 다음 주기로 넘어감.
+const Duration gpsTimeout = Duration(seconds: 20);
+
 Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
 
@@ -64,6 +68,7 @@ Future<void> initializeBackgroundService() async {
 ///   requiredConsecutiveFastReadings(2)번 연속 나오면 급격 모드로 진입,
 ///   이후 fastIntervalSeconds(10초) 간격으로 기록
 /// - 급격 모드 중 신뢰 가능한 고속 판정이 한 번이라도 끊기면 즉시 평소 간격으로 복귀
+/// - GPS/주소 획득이 실패해도 앱은 절대 죽지 않고, "실패"라는 상태로 정상 기록한다.
 @pragma('vm:entry-point')
 void onServiceStart(ServiceInstance service) async {
   DartPluginRegistrant.ensureInitialized();
@@ -81,9 +86,14 @@ void onServiceStart(ServiceInstance service) async {
   int consecutiveFastReadings = 0;
 
   while (!stopped) {
-    final position = await _collectAndSaveLocation();
+    final result = await _collectAndSaveLocation();
 
-    final reliableFast = position != null && _isReliableFastReading(position);
+    final reliableFast = result.status == LocationStatus.ok &&
+        _isReliableFastReading(
+          speedMps: result.speedMps,
+          accuracyMeters: result.accuracyMeters,
+          speedAccuracyMps: result.speedAccuracyMps,
+        );
     consecutiveFastReadings = reliableFast ? consecutiveFastReadings + 1 : 0;
 
     final isRapidMove = consecutiveFastReadings >= requiredConsecutiveFastReadings;
@@ -97,56 +107,116 @@ void onServiceStart(ServiceInstance service) async {
 /// - 속도가 임계값 이상이어야 하고
 /// - 위치 정확도가 충분히 좋아야 하고 (GPS 오차로 인한 스파이크 배제)
 /// - 속도 추정치 자체의 오차도 충분히 작아야 함 (0이면 "값 없음"으로 보고 건너뜀)
-bool _isReliableFastReading(Position position) {
-  final isFastEnough = position.speed >= rapidSpeedThresholdMps;
-  final hasGoodAccuracy = position.accuracy <= maxAcceptableAccuracyMeters;
-  final speedAccuracyOk = position.speedAccuracy <= 0 ||
-      position.speedAccuracy <= maxAcceptableSpeedAccuracyMps;
+bool _isReliableFastReading({
+  required double speedMps,
+  required double accuracyMeters,
+  required double speedAccuracyMps,
+}) {
+  final isFastEnough = speedMps >= rapidSpeedThresholdMps;
+  final hasGoodAccuracy = accuracyMeters <= maxAcceptableAccuracyMeters;
+  final speedAccuracyOk =
+      speedAccuracyMps <= 0 || speedAccuracyMps <= maxAcceptableSpeedAccuracyMps;
 
   return isFastEnough && hasGoodAccuracy && speedAccuracyOk;
 }
 
-/// 위치를 한 번 수집해서 DB에 저장하고, 다음 간격 판단에 쓸 Position을 반환합니다.
-/// 실패하면 null을 반환하고, 이 경우 호출부에서는 평소 간격으로 다음 시도를 합니다.
-Future<Position?> _collectAndSaveLocation() async {
+/// 한 번의 수집 결과. 다음 로그 간격(평소/급격)을 판단하는 데 필요한 값만 담는다.
+class _CollectResult {
+  final LocationStatus status;
+  final double speedMps;
+  final double accuracyMeters;
+  final double speedAccuracyMps;
+
+  _CollectResult({
+    required this.status,
+    this.speedMps = 0,
+    this.accuracyMeters = 0,
+    this.speedAccuracyMps = 0,
+  });
+}
+
+/// 위치를 한 번 수집해서 DB + 파일 로그에 저장합니다.
+///
+/// 중요: 이 함수는 절대 예외를 밖으로 던지지 않습니다.
+/// GPS를 못 얻으면 "위치 획득 실패", 주소만 못 얻으면 "주소 획득 실패"로
+/// 정상적으로 한 줄을 기록하고 넘어갑니다. (요청사항: 실패 = 에러가 아니라 기록되어야 함)
+Future<_CollectResult> _collectAndSaveLocation() async {
+  final now = DateTime.now();
+
+  double? lat;
+  double? lng;
+  double speedMps = 0;
+  double accuracyMeters = 0;
+  double speedAccuracyMps = 0;
+  LocationStatus status = LocationStatus.ok;
+
+  // 1단계: GPS 위치 획득 (실패하면 gpsFailed로 기록하고 아래 단계는 건너뜀)
   try {
     final hasPermission = await _ensureLocationPermission();
-    if (!hasPermission) return null;
+    if (!hasPermission) {
+      status = LocationStatus.gpsFailed;
+    } else {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      ).timeout(gpsTimeout);
 
-    final position = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
-
-    // 카카오 API로 간단주소(구/동)만 미리 조회해서 함께 저장
-    final region = await KakaoApi.coordToRegion(
-      position.latitude,
-      position.longitude,
-    );
-
-    final record = LocationRecord(
-      latitude: position.latitude,
-      longitude: position.longitude,
-      timestamp: DateTime.now(),
-      region2: region?.region2,
-      region3: region?.region3,
-    );
-
-    await DatabaseHelper.instance.insertRecord(record);
-
-    // 다운로드/gps_logs/날짜.csv 파일에도 같은 기록을 남김 (구/동 주소 포함)
-    await GpsLogFileService.appendLog(
-      timestamp: record.timestamp,
-      latitude: record.latitude,
-      longitude: record.longitude,
-      region2: record.region2,
-      region3: record.region3,
-    );
-
-    return position;
+      lat = position.latitude;
+      lng = position.longitude;
+      speedMps = position.speed;
+      accuracyMeters = position.accuracy;
+      speedAccuracyMps = position.speedAccuracy;
+    }
   } catch (e) {
-    // 수집 실패는 조용히 무시 (다음 주기에 재시도)
-    return null;
+    // 권한 취소, GPS 신호 없음, timeout 등 - 무엇이든 "위치 획득 실패"로 처리
+    status = LocationStatus.gpsFailed;
   }
+
+  String? region2;
+  String? region3;
+
+  // 2단계: 주소 변환 (GPS가 성공했을 때만 시도)
+  if (status == LocationStatus.ok && lat != null && lng != null) {
+    // KakaoApi는 내부에서 이미 타임아웃/예외를 흡수해서 null만 반환한다.
+    final region = await KakaoApi.coordToRegion(lat, lng);
+    if (region == null) {
+      status = LocationStatus.addressFailed;
+    } else {
+      region2 = region.region2;
+      region3 = region.region3;
+    }
+  }
+
+  final record = LocationRecord(
+    latitude: lat,
+    longitude: lng,
+    timestamp: now,
+    region2: region2,
+    region3: region3,
+    status: status,
+  );
+
+  // 3단계: 저장 (DB, 파일 로그) - 이 저장 자체가 실패해도 앱은 계속 진행되어야 함
+  try {
+    await DatabaseHelper.instance.insertRecord(record);
+  } catch (e) {
+    // DB 저장 실패(드묾)도 앱을 죽이지 않고 무시, 다음 주기에 계속 진행
+  }
+
+  await GpsLogFileService.appendLog(
+    timestamp: record.timestamp,
+    latitude: record.latitude,
+    longitude: record.longitude,
+    region2: record.region2,
+    region3: record.region3,
+    status: record.status,
+  );
+
+  return _CollectResult(
+    status: status,
+    speedMps: speedMps,
+    accuracyMeters: accuracyMeters,
+    speedAccuracyMps: speedAccuracyMps,
+  );
 }
 
 Future<bool> _ensureLocationPermission() async {
