@@ -14,6 +14,11 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   Map<String, List<LocationRecord>> _grouped = {};
+
+  // 시간 오름차순(과거 -> 현재)으로 정렬된 전체 기록.
+  // 상세화면에서 "선택 지점 기준 이전 4개 / 다음 4개"를 계산할 때 씀.
+  List<LocationRecord> _allRecordsAscending = [];
+
   bool _loading = true;
 
   @override
@@ -23,9 +28,19 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadRecords() async {
-    final grouped = await DatabaseHelper.instance.getRecordsGroupedByDate();
+    // timestamp DESC(최신순)로 옴
+    final records = await DatabaseHelper.instance.getAllRecords();
+
+    final grouped = <String, List<LocationRecord>>{};
+    for (final r in records) {
+      final dateKey =
+          '${r.timestamp.year.toString().padLeft(4, '0')}-${r.timestamp.month.toString().padLeft(2, '0')}-${r.timestamp.day.toString().padLeft(2, '0')}';
+      grouped.putIfAbsent(dateKey, () => []).add(r);
+    }
+
     setState(() {
       _grouped = grouped;
+      _allRecordsAscending = records.reversed.toList(); // 과거 -> 현재 순으로 뒤집음
       _loading = false;
     });
   }
@@ -43,7 +58,12 @@ class _HomeScreenState extends State<HomeScreen> {
   void _openDetail(LocationRecord record) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (_) => DetailScreen(record: record)),
+      MaterialPageRoute(
+        builder: (_) => DetailScreen(
+          record: record,
+          allRecords: _allRecordsAscending,
+        ),
+      ),
     );
   }
 
