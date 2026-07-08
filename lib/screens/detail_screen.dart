@@ -295,14 +295,24 @@ class _DetailScreenState extends State<DetailScreen> {
     });
 
     if (points.length > 1) {
-      map.setBounds(bounds);
+      // 지도 div가 화면에 완전히 자리잡기 전에 setBounds를 호출하면
+      // 컨테이너 크기 계산이 잘못돼서, 같은 데이터인데도 열 때마다
+      // 확대 수준이 다르게 나오는 문제가 있었음.
+      // 지도가 실제로 다 로드된 뒤(tilesloaded)에 한 번만 실행되도록 미룬다.
+      var didFitBounds = false;
+      kakao.maps.event.addListener(map, 'tilesloaded', function () {
+        if (didFitBounds) return;
+        didFitBounds = true;
 
-      // 그래도 남은 지점들 범위가 너무 넓어서 과도하게 줌아웃되는 경우를 대비한
-      // 마지막 안전장치: 선택 지점 기준 적당한 확대 수준으로 되돌린다.
-      if (map.getLevel() > 7) {
-        map.setLevel(6);
-        map.setCenter(new kakao.maps.LatLng(${center.lat}, ${center.lng}));
-      }
+        map.setBounds(bounds);
+
+        // 그래도 남은 지점들 범위가 너무 넓어서 과도하게 줌아웃되는 경우를 대비한
+        // 마지막 안전장치: 선택 지점 기준 적당한 확대 수준으로 되돌린다.
+        if (map.getLevel() > 7) {
+          map.setLevel(6);
+          map.setCenter(new kakao.maps.LatLng(${center.lat}, ${center.lng}));
+        }
+      });
     }
   </script>
 </body>
