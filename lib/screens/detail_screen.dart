@@ -48,17 +48,24 @@ class DetailScreen extends StatefulWidget {
 class _DetailScreenState extends State<DetailScreen> {
   KakaoAddressResult? _detailAddress;
   bool _loadingAddress = true;
-  late final WebViewController _webController;
+  WebViewController? _webController;
   late final List<_MapPoint> _mapPoints;
 
   @override
   void initState() {
     super.initState();
     _mapPoints = _buildMapPoints();
-    _webController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..loadHtmlString(_buildMapHtml(_mapPoints));
-    _loadDetailAddress();
+    if (_mapPoints.isNotEmpty) {
+      _webController = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..loadHtmlString(_buildMapHtml(_mapPoints));
+    }
+    // 좌표 자체가 없으면(위치 획득 실패) 상세 주소를 조회할 수 없으므로 바로 로딩 종료
+    if (widget.record.hasCoordinates) {
+      _loadDetailAddress();
+    } else {
+      _loadingAddress = false;
+    }
   }
 
   /// 선택 지점을 기준으로 시간순으로 이전 최대 4개, 다음 최대 4개를 뽑아
@@ -67,15 +74,25 @@ class _DetailScreenState extends State<DetailScreen> {
   /// 예) 이전 4 + 선택 + 다음 4 -> 1,2,3,4,5(선택),6,7,8,9
   ///     이전 1 + 선택 + 다음 3 -> 1,2(선택),3,4,5
   /// (앞/뒤가 4개보다 적으면 있는 만큼만 채운다.)
+  ///
+  /// GPS 획득 실패로 좌표가 없는 기록은 지도에 찍을 수 없으므로,
+  /// 이웃(이전/다음)을 고를 때도 좌표가 있는 기록만 대상으로 한다.
+  /// 선택 지점 자체가 좌표가 없으면(정상적으로는 목록에서 맵보기 버튼이
+  /// 비활성화되어 여기까지 오지 않지만) 빈 목록을 반환해 build()에서 안내 문구를 보여준다.
   List<_MapPoint> _buildMapPoints() {
-    final all = widget.allRecords;
     final selected = widget.record;
+    if (!selected.hasCoordinates) {
+      return [];
+    }
+
+    // 좌표가 있는 기록만 지도에 찍을 수 있으므로 미리 걸러낸다.
+    final all = widget.allRecords.where((r) => r.hasCoordinates).toList();
 
     if (all.isEmpty) {
       return [
         _MapPoint(
-          lat: selected.latitude,
-          lng: selected.longitude,
+          lat: selected.latitude!,
+          lng: selected.longitude!,
           label: '1',
           isSelected: true,
           timestamp: selected.timestamp,
@@ -88,8 +105,8 @@ class _DetailScreenState extends State<DetailScreen> {
       // 목록에서 못 찾으면 안전하게 선택 지점만 표시
       return [
         _MapPoint(
-          lat: selected.latitude,
-          lng: selected.longitude,
+          lat: selected.latitude!,
+          lng: selected.longitude!,
           label: '1',
           isSelected: true,
           timestamp: selected.timestamp,
@@ -107,8 +124,8 @@ class _DetailScreenState extends State<DetailScreen> {
 
     for (var i = 0; i < previous.length; i++) {
       points.add(_MapPoint(
-        lat: previous[i].latitude,
-        lng: previous[i].longitude,
+        lat: previous[i].latitude!,
+        lng: previous[i].longitude!,
         label: '${i + 1}',
         isSelected: false,
         timestamp: previous[i].timestamp,
@@ -117,8 +134,8 @@ class _DetailScreenState extends State<DetailScreen> {
 
     // 선택 지점도 이전 것들 뒤를 이어받는 번호를 가짐 (예: 이전이 4개면 선택은 5번)
     points.add(_MapPoint(
-      lat: selected.latitude,
-      lng: selected.longitude,
+      lat: selected.latitude!,
+      lng: selected.longitude!,
       label: '${previous.length + 1}',
       isSelected: true,
       timestamp: selected.timestamp,
@@ -126,8 +143,8 @@ class _DetailScreenState extends State<DetailScreen> {
 
     for (var i = 0; i < next.length; i++) {
       points.add(_MapPoint(
-        lat: next[i].latitude,
-        lng: next[i].longitude,
+        lat: next[i].latitude!,
+        lng: next[i].longitude!,
         label: '${previous.length + 2 + i}',
         isSelected: false,
         timestamp: next[i].timestamp,
@@ -139,8 +156,8 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> _loadDetailAddress() async {
     final result = await KakaoApi.coordToDetailAddress(
-      widget.record.latitude,
-      widget.record.longitude,
+      widget.record.latitude!,
+      widget.record.longitude!,
     );
     setState(() {
       _detailAddress = result;
@@ -248,7 +265,13 @@ class _DetailScreenState extends State<DetailScreen> {
         children: [
           SizedBox(
             height: 320,
-            child: WebViewWidget(controller: _webController),
+            child: _webController != null
+                ? WebViewWidget(controller: _webController!)
+                : Container(
+                    color: Colors.grey[200],
+                    alignment: Alignment.center,
+                    child: const Text('위치 정보가 없어 지도를 표시할 수 없어요'),
+                  ),
           ),
           if (_mapPoints.length > 1) _MapLegend(points: _mapPoints),
           const Divider(height: 1),
@@ -259,7 +282,9 @@ class _DetailScreenState extends State<DetailScreen> {
               children: [
                 const Text('상세 주소', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 const SizedBox(height: 8),
-                if (_loadingAddress)
+                if (!record.hasCoordinates)
+                  const Text('위치 획득 실패')
+                else if (_loadingAddress)
                   const CircularProgressIndicator()
                 else ...[
                   if (_detailAddress?.roadAddress != null)
@@ -271,7 +296,9 @@ class _DetailScreenState extends State<DetailScreen> {
                 ],
                 const SizedBox(height: 16),
                 Text(
-                  '좌표: ${record.latitude.toStringAsFixed(6)}, ${record.longitude.toStringAsFixed(6)}',
+                  record.hasCoordinates
+                      ? '좌표: ${record.latitude!.toStringAsFixed(6)}, ${record.longitude!.toStringAsFixed(6)}'
+                      : '좌표 없음',
                   style: TextStyle(color: Colors.grey[600], fontSize: 12),
                 ),
               ],
