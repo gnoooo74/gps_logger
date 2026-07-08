@@ -36,6 +36,9 @@ jobs:
       - name: AndroidManifest에 위치/알림 권한 추가
         run: python3 scripts/patch_manifest.py
 
+      - name: build.gradle에 core library desugaring 활성화 (flutter_local_notifications 요구사항)
+        run: python3 scripts/patch_build_gradle.py
+
       - name: Release APK 빌드
         run: flutter build apk --release
 
