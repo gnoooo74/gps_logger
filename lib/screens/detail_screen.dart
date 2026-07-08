@@ -8,7 +8,7 @@ import '../services/kakao_api.dart';
 /// 카카오맵 JavaScript SDK 앱 키
 /// https://developers.kakao.com 에서 [내 애플리케이션] > [앱 키] > JavaScript 키를 발급받아 넣어주세요.
 /// 또한 [플랫폼] > [Web]에 사용할 도메인을 등록해야 지도가 로드됩니다.
-const String kakaoJsKey = 'YOUR_KAKAO_JS_KEY_HERE';
+const String kakaoJsKey = 'bf9eb98747c162b90cb9910d16487d7a';
 
 /// 지도에 찍을 지점 하나를 표현. 선택 지점인지, 몇 번 라벨인지를 함께 들고 있음.
 class _MapPoint {
