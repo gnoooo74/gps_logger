@@ -295,15 +295,14 @@ class _DetailScreenState extends State<DetailScreen> {
     });
 
     if (points.length > 1) {
-      // 지도 div가 화면에 완전히 자리잡기 전에 setBounds를 호출하면
+      // 지도 div가 웹뷰 안에서 화면에 완전히 자리잡기 전에 setBounds를 호출하면
       // 컨테이너 크기 계산이 잘못돼서, 같은 데이터인데도 열 때마다
-      // 확대 수준이 다르게 나오는 문제가 있었음.
-      // 지도가 실제로 다 로드된 뒤(tilesloaded)에 한 번만 실행되도록 미룬다.
-      var didFitBounds = false;
-      kakao.maps.event.addListener(map, 'tilesloaded', function () {
-        if (didFitBounds) return;
-        didFitBounds = true;
-
+      // 확대 수준/위치가 다르게 나오는 문제가 있었음.
+      // tilesloaded 이벤트만으로는 웹뷰 레이아웃이 덜 자리잡은 시점에도
+      // 발생해버려서 불안정했기 때문에, 일정 시간 지연을 준 뒤
+      // relayout()으로 컨테이너 크기를 강제로 다시 계산시키고 나서 범위를 맞춘다.
+      setTimeout(function () {
+        map.relayout();
         map.setBounds(bounds);
 
         // 그래도 남은 지점들 범위가 너무 넓어서 과도하게 줌아웃되는 경우를 대비한
@@ -312,7 +311,7 @@ class _DetailScreenState extends State<DetailScreen> {
           map.setLevel(6);
           map.setCenter(new kakao.maps.LatLng(${center.lat}, ${center.lng}));
         }
-      });
+      }, 300);
     }
   </script>
 </body>
