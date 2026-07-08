@@ -146,13 +146,18 @@ class _LocationCard extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        onTap: onMapTap,
+        onTap: record.hasCoordinates ? onMapTap : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              const Icon(Icons.location_on_outlined, color: Colors.deepPurple),
+              Icon(
+                record.hasCoordinates
+                    ? Icons.location_on_outlined
+                    : Icons.location_off_outlined,
+                color: record.hasCoordinates ? Colors.deepPurple : Colors.grey,
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -164,15 +169,18 @@ class _LocationCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      record.simpleAddress, // 동 이름까지 포함된 간단 주소
-                      style: const TextStyle(
+                      record.simpleAddress, // 동 이름 또는 실패 사유("위치 획득 실패" 등)
+                      style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w600,
+                        color: record.hasCoordinates ? null : Colors.grey[600],
                       ),
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      '${record.latitude.toStringAsFixed(6)}, ${record.longitude.toStringAsFixed(6)}',
+                      record.hasCoordinates
+                          ? '${record.latitude!.toStringAsFixed(6)}, ${record.longitude!.toStringAsFixed(6)}'
+                          : '좌표 없음',
                       style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                     ),
                   ],
@@ -180,7 +188,8 @@ class _LocationCard extends StatelessWidget {
               ),
               const SizedBox(width: 8),
               OutlinedButton.icon(
-                onPressed: onMapTap,
+                // 좌표가 없으면 지도에 찍을 게 없으니 버튼을 비활성화
+                onPressed: record.hasCoordinates ? onMapTap : null,
                 icon: const Icon(Icons.map_outlined, size: 16),
                 label: const Text('맵보기'),
                 style: OutlinedButton.styleFrom(
