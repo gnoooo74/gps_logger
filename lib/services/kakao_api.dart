@@ -4,7 +4,7 @@ import 'package:http/http.dart' as http;
 
 /// 카카오 REST API 키
 /// https://developers.kakao.com 에서 앱 생성 후 [내 애플리케이션] > [앱 키] > REST API 키를 발급받아 넣어주세요.
-const String kakaoRestApiKey = 'YOUR_KAKAO_REST_API_KEY_HERE';
+const String kakaoRestApiKey = 'f1a4aa6779d7c7f8334bd0055d75ee8f';
 
 /// 네트워크가 느리거나 응답이 없을 때 무한정 기다리지 않도록 하는 제한 시간.
 /// 이 시간을 넘기면 실패로 처리하고 null을 반환한다 (예외를 던지지 않음).
