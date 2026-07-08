@@ -76,6 +76,67 @@ class DatabaseHelper {
     return db.delete('location_records');
   }
 
+  /// 기록이 하나라도 있는 날짜 목록(yyyy-MM-dd)을 최신순으로 반환.
+  /// 전체 레코드를 안 불러오고 날짜만 가볍게 조회함 (날짜 선택 화면용).
+  Future<List<String>> getAvailableDates() async {
+    final db = await database;
+    final rows = await db.rawQuery('''
+      SELECT DISTINCT substr(timestamp, 1, 10) as date
+      FROM location_records
+      ORDER BY date DESC
+    ''');
+    return rows.map((r) => r['date'] as String).toList();
+  }
+
+  /// 특정 날짜(yyyy-MM-dd)의 기록만 조회 (최신순).
+  /// 홈 화면이 그 날짜의 기록만 불러오도록 해서, 기록이 아무리 쌓여도
+  /// 한 번에 다 불러오지 않게 하기 위함.
+  Future<List<LocationRecord>> getRecordsForDate(String dateKey) async {
+    final db = await database;
+    final rows = await db.query(
+      'location_records',
+      where: 'timestamp LIKE ?',
+      whereArgs: ['$dateKey%'],
+      orderBy: 'timestamp DESC',
+    );
+    return rows.map((e) => LocationRecord.fromMap(e)).toList();
+  }
+
+  /// 상세화면(지도)에서 "선택 지점 기준 이전 N개 / 다음 N개"를 보여주기 위한
+  /// 이웃 기록만 가볍게 조회. 날짜 경계를 넘어서도(예: 자정 근처) 정확하게
+  /// 이전/다음을 찾을 수 있도록 전체 테이블에서 직접 조회한다.
+  /// (좌표가 없는 GPS 실패 기록은 지도에 찍을 수 없으므로 애초에 제외)
+  Future<List<LocationRecord>> getNeighborWindow(
+    LocationRecord selected, {
+    int before = 4,
+    int after = 4,
+  }) async {
+    final db = await database;
+    final ts = selected.timestamp.toIso8601String();
+
+    final prevRows = await db.query(
+      'location_records',
+      where: 'timestamp < ? AND latitude IS NOT NULL AND longitude IS NOT NULL',
+      whereArgs: [ts],
+      orderBy: 'timestamp DESC',
+      limit: before,
+    );
+    final nextRows = await db.query(
+      'location_records',
+      where: 'timestamp > ? AND latitude IS NOT NULL AND longitude IS NOT NULL',
+      whereArgs: [ts],
+      orderBy: 'timestamp ASC',
+      limit: after,
+    );
+
+    // prevRows는 최신순으로 왔으니 뒤집어서 과거->현재 순으로 맞춘다.
+    final previous =
+        prevRows.map((e) => LocationRecord.fromMap(e)).toList().reversed.toList();
+    final next = nextRows.map((e) => LocationRecord.fromMap(e)).toList();
+
+    return [...previous, selected, ...next];
+  }
+
   /// 날짜(yyyy-MM-dd) 별로 그룹핑해서 반환
   Future<Map<String, List<LocationRecord>>> getRecordsGroupedByDate() async {
     final records = await getAllRecords();
