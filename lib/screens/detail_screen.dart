@@ -58,7 +58,10 @@ class _DetailScreenState extends State<DetailScreen> {
     if (_mapPoints.isNotEmpty) {
       _webController = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
-        ..loadHtmlString(_buildMapHtml(_mapPoints));
+        ..loadHtmlString(
+          _buildMapHtml(_mapPoints),
+          baseUrl: 'https://localhost',
+        );
     }
     // 좌표 자체가 없으면(위치 획득 실패) 상세 주소를 조회할 수 없으므로 바로 로딩 종료
     if (widget.record.hasCoordinates) {
