@@ -40,6 +40,16 @@ const Duration gpsTimeout = Duration(seconds: 20);
 Future<void> initializeBackgroundService() async {
   final service = FlutterBackgroundService();
 
+  // 앱을 다시 열 때마다 main()이 재실행되면서 이 함수가 다시 불릴 수 있는데,
+  // 이미 서비스가 돌고 있는 상태에서 configure()/startService()를 또 호출하면
+  // 이미 떠 있는 포그라운드 알림과 충돌해서 CannotPostForegroundServiceNotificationException
+  // ("Bad notification for startForeground")로 죽는 케이스가 있었음.
+  // 이미 실행 중이면 그대로 두고 아무것도 하지 않는다.
+  final alreadyRunning = await service.isRunning();
+  if (alreadyRunning) {
+    return;
+  }
+
   await service.configure(
     androidConfiguration: AndroidConfiguration(
       onStart: onServiceStart,
