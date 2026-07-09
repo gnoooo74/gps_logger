@@ -17,6 +17,10 @@ class _HomeScreenState extends State<HomeScreen> {
   List<LocationRecord> _records = [];
   bool _loading = true;
 
+  // 마지막으로 "맵보기"를 눌러서 봤던 기록의 id. 목록에 돌아왔을 때
+  // 이 기록을 눈에 띄게 표시해서 어떤 걸 봤었는지 바로 알 수 있게 함.
+  int? _lastViewedId;
+
   @override
   void initState() {
     super.initState();
@@ -111,12 +115,14 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  final Map<int, GlobalKey> _itemKeys = {};
+
   Future<void> _openDetail(LocationRecord record) async {
     final neighborWindow =
         await DatabaseHelper.instance.getNeighborWindow(record);
     if (!mounted) return;
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => DetailScreen(
@@ -125,6 +131,23 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+
+    if (!mounted) return;
+    setState(() => _lastViewedId = record.id);
+
+    // 지도를 보고 돌아왔을 때, 방금 봤던 항목이 화면 안에 들어오도록 스크롤.
+    // (프레임이 그려진 다음에 위치를 알 수 있어서 한 프레임 뒤에 실행)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final key = _itemKeys[record.id];
+      final ctx = key?.currentContext;
+      if (ctx != null) {
+        Scrollable.ensureVisible(
+          ctx,
+          duration: const Duration(milliseconds: 300),
+          alignment: 0.5,
+        );
+      }
+    });
   }
 
   @override
@@ -170,10 +193,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     itemCount: _records.length,
                     itemBuilder: (context, index) {
                       final record = _records[index];
+                      final key = _itemKeys.putIfAbsent(
+                        record.id!,
+                        () => GlobalKey(),
+                      );
                       return _LocationCard(
+                        key: key,
                         record: record,
                         timeLabel: _formatTime(record.timestamp),
                         onMapTap: () => _openDetail(record),
+                        isLastViewed: record.id == _lastViewedId,
                       );
                     },
                   ),
@@ -186,22 +215,34 @@ class _LocationCard extends StatelessWidget {
   final LocationRecord record;
   final String timeLabel;
   final VoidCallback onMapTap;
+  final bool isLastViewed;
 
   const _LocationCard({
+    super.key,
     required this.record,
     required this.timeLabel,
     required this.onMapTap,
+    this.isLastViewed = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final highlightColor = Colors.amber[700]!;
+
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       elevation: 0,
-      color: Colors.deepPurple.withOpacity(0.04),
+      color: isLastViewed
+          ? highlightColor.withOpacity(0.12)
+          : Colors.deepPurple.withOpacity(0.04),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: Colors.deepPurple.withOpacity(0.1)),
+        side: BorderSide(
+          color: isLastViewed
+              ? highlightColor
+              : Colors.deepPurple.withOpacity(0.1),
+          width: isLastViewed ? 1.5 : 1,
+        ),
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -215,16 +256,42 @@ class _LocationCard extends StatelessWidget {
                 record.hasCoordinates
                     ? Icons.location_on_outlined
                     : Icons.location_off_outlined,
-                color: record.hasCoordinates ? Colors.deepPurple : Colors.grey,
+                color: isLastViewed
+                    ? highlightColor
+                    : (record.hasCoordinates ? Colors.deepPurple : Colors.grey),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      timeLabel, // 시:분:초
-                      style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+                    Row(
+                      children: [
+                        Text(
+                          timeLabel, // 시:분:초
+                          style:
+                              TextStyle(fontSize: 12, color: Colors.grey[600]),
+                        ),
+                        if (isLastViewed) ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: highlightColor,
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Text(
+                              '방금 본 위치',
+                              style: TextStyle(
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                     const SizedBox(height: 2),
                     Text(
